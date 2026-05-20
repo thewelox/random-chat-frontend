@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 
 const socket = io(
-  "https://YOUR-RAILWAY-URL.up.railway.app"
+  "https://random-chat-backend-production-a6fe.up.railway.app/"
 );
 
 export default function Home() {
