@@ -1,26 +1,42 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
 import { io } from "socket.io-client";
+
 import {
   Send,
   SkipForward,
+  Reply,
+  X,
 } from "lucide-react";
 
 const socket = io(
-  "https://random-chat-backend-production-a6fe.up.railway.app"
+  "https://YOUR-RAILWAY-URL.up.railway.app"
 );
 
 export default function Home() {
   const [nickname, setNickname] = useState("");
+
   const [joined, setJoined] = useState(false);
 
   const [messages, setMessages] = useState<any[]>([]);
+
   const [input, setInput] = useState("");
 
-  const [connected, setConnected] = useState(false);
+  const [connected, setConnected] =
+    useState(false);
 
   const [typing, setTyping] = useState(false);
+
+  const [replyingTo, setReplyingTo] =
+    useState<any>(null);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     socket.on("matched", () => {
@@ -41,7 +57,7 @@ export default function Home() {
 
       setTimeout(() => {
         setTyping(false);
-      }, 1500);
+      }, 1200);
     });
 
     return () => {
@@ -51,6 +67,12 @@ export default function Home() {
       socket.off("typing");
     };
   }, []);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({
+      behavior: "smooth",
+    });
+  }, [messages]);
 
   const joinChat = () => {
     if (!nickname.trim()) return;
@@ -67,10 +89,12 @@ export default function Home() {
 
     socket.emit("message", {
       text: input,
-      nickname,
+      replyTo: replyingTo?.text || null,
     });
 
     setInput("");
+
+    setReplyingTo(null);
   };
 
   const nextStranger = () => {
@@ -94,7 +118,7 @@ export default function Home() {
           </h1>
 
           <p className="text-white/60 mb-8">
-            Anonymous conversations with strangers.
+            Anonymous conversations.
           </p>
 
           <input
@@ -108,7 +132,7 @@ export default function Home() {
 
           <button
             onClick={joinChat}
-            className="w-full bg-purple-600 hover:bg-purple-700 transition-all py-4 rounded-2xl font-semibold"
+            className="w-full bg-purple-600 hover:bg-purple-700 py-4 rounded-2xl font-semibold"
           >
             Start Chatting
           </button>
@@ -118,18 +142,18 @@ export default function Home() {
   }
 
   return (
-    <main className="h-screen bg-black text-white flex flex-col">
-      <div className="p-5 border-b border-white/10 flex justify-between items-center">
+    <main className="h-screen bg-black text-white flex flex-col overflow-hidden">
+      <div className="p-4 border-b border-white/10 flex justify-between items-center shrink-0">
         <div>
-          <h1 className="text-2xl font-bold">
+          <h1 className="text-xl font-bold">
             {connected
               ? "Stranger Connected"
               : "Finding Stranger..."}
           </h1>
 
           {typing && (
-            <p className="text-sm text-white/50 mt-1">
-              Stranger typing...
+            <p className="text-xs text-white/40 mt-1">
+              typing...
             </p>
           )}
         </div>
@@ -138,53 +162,101 @@ export default function Home() {
           onClick={nextStranger}
           className="bg-white/10 hover:bg-white/20 p-3 rounded-2xl"
         >
-          <SkipForward />
+          <SkipForward size={18} />
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-5 space-y-4">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((msg, index) => (
           <div
             key={index}
-            className={`max-w-xs p-4 rounded-2xl ${
+            className={`flex ${
               msg.sender === socket.id
-                ? "ml-auto bg-purple-600"
-                : "bg-white/10"
+                ? "justify-end"
+                : "justify-start"
             }`}
           >
-            <p className="text-xs text-white/50 mb-1">
-              {msg.nickname}
-            </p>
+            <div
+              className={`max-w-[80%] rounded-3xl px-4 py-3 ${
+                msg.sender === socket.id
+                  ? "bg-purple-600"
+                  : "bg-white/10"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-4 mb-1">
+                <p className="text-xs text-white/50">
+                  {msg.nickname}
+                </p>
 
-            <p>{msg.text}</p>
+                <button
+                  onClick={() =>
+                    setReplyingTo(msg)
+                  }
+                  className="text-white/40 hover:text-white"
+                >
+                  <Reply size={14} />
+                </button>
+              </div>
+
+              {msg.replyTo && (
+                <div className="bg-black/30 rounded-xl px-3 py-2 text-xs text-white/50 mb-2 border-l-2 border-purple-400">
+                  {msg.replyTo}
+                </div>
+              )}
+
+              <p className="break-words">
+                {msg.text}
+              </p>
+            </div>
           </div>
         ))}
+
+        <div ref={messagesEndRef} />
       </div>
 
-      <div className="p-5 flex gap-3 border-t border-white/10">
-        <input
-          value={input}
-          onChange={handleTyping}
-          placeholder="Type message..."
-          className="flex-1 bg-white/10 rounded-2xl px-5 py-4 outline-none"
-        />
+      <div className="shrink-0 border-t border-white/10 bg-black/90 backdrop-blur-xl p-3">
+        {replyingTo && (
+          <div className="mb-3 bg-white/10 rounded-2xl px-4 py-3 flex items-center justify-between">
+            <div>
+              <p className="text-xs text-white/40">
+                Replying to
+              </p>
 
-        <button
-          onClick={sendMessage}
-          className="bg-purple-600 hover:bg-purple-700 p-4 rounded-2xl"
-        >
-          <Send />
-        </button>
+              <p className="text-sm truncate max-w-[220px]">
+                {replyingTo.text}
+              </p>
+            </div>
+
+            <button
+              onClick={() =>
+                setReplyingTo(null)
+              }
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          <input
+            value={input}
+            onChange={handleTyping}
+            placeholder="Type message..."
+            className="flex-1 bg-white/10 rounded-2xl px-5 py-4 outline-none"
+          />
+
+          <button
+            onClick={sendMessage}
+            className="bg-purple-600 hover:bg-purple-700 p-4 rounded-2xl shrink-0"
+          >
+            <Send size={18} />
+          </button>
+        </div>
+
+        <div className="text-center text-white/20 text-xs mt-3">
+          Built by WELOX & CO ✦
+        </div>
       </div>
-      <div className="text-center py-4 border-t border-white/10">
-  <h2 className="text-lg font-semibold tracking-[0.3em] text-white/70">
-    WELOX & CO
-  </h2>
-
-  <p className="text-xs text-white/30 mt-1">
-    Building digital experiences for the next era.
-  </p>
-</div>
     </main>
   );
 }
