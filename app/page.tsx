@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 
 const socket = io(
-  "https://random-chat-backend-production-a6fe.up.railway.app/"
+  "https://vibe-backend-xexf.onrender.com"
 );
 
 export default function Home() {
