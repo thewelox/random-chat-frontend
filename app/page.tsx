@@ -8,6 +8,8 @@ import {
 
 import { io } from "socket.io-client";
 
+import { motion } from "framer-motion";
+
 import {
   Send,
   SkipForward,
@@ -50,11 +52,23 @@ export default function Home() {
   const messagesEndRef =
     useRef<HTMLDivElement>(null);
 
+  const matchSound =
+    typeof Audio !== "undefined"
+      ? new Audio("/match.mp3")
+      : null;
+
+  const messageSound =
+    typeof Audio !== "undefined"
+      ? new Audio("/message.mp3")
+      : null;
+
   useEffect(() => {
     socket.on("matched", () => {
       setConnected(true);
 
       setMessages([]);
+
+      matchSound?.play();
     });
 
     socket.on("message", (data) => {
@@ -62,6 +76,8 @@ export default function Home() {
         ...prev,
         data,
       ]);
+
+      messageSound?.play();
     });
 
     socket.on("stranger_left", () => {
@@ -147,13 +163,25 @@ export default function Home() {
 
   if (!joined) {
     return (
-      <main className="h-screen bg-black text-white flex items-center justify-center px-6">
-        <div className="w-full max-w-md bg-white/5 border border-white/10 p-8 rounded-3xl backdrop-blur-xl">
-          <h1 className="text-5xl font-black mb-3 tracking-wide">
+      <main className="h-screen bg-black text-white flex items-center justify-center px-6 overflow-hidden">
+        <div className="absolute inset-0 bg-purple-500/10 blur-3xl" />
+
+        <motion.div
+          initial={{
+            opacity: 0,
+            y: 20,
+          }}
+          animate={{
+            opacity: 1,
+            y: 0,
+          }}
+          className="relative w-full max-w-md bg-white/5 border border-white/10 p-8 rounded-3xl backdrop-blur-2xl"
+        >
+          <h1 className="text-5xl font-black mb-3 tracking-[0.3em] text-center">
             VIBE
           </h1>
 
-          <p className="text-white/60 mb-8">
+          <p className="text-white/60 mb-8 text-center">
             Real conversations with
             real people.
           </p>
@@ -166,7 +194,7 @@ export default function Home() {
               )
             }
             placeholder="Choose nickname"
-            className="w-full bg-white/10 rounded-2xl px-5 py-4 outline-none mb-4"
+            className="w-full bg-white/10 rounded-2xl px-5 py-4 outline-none mb-4 border border-white/10"
           />
 
           <div className="flex gap-3 mb-5">
@@ -207,14 +235,14 @@ export default function Home() {
           <div className="text-center text-white/30 text-xs mt-6">
             PROUDLY MADE IN INDIA 🇮🇳
           </div>
-        </div>
+        </motion.div>
       </main>
     );
   }
 
   return (
     <main className="h-screen bg-black text-white flex flex-col overflow-hidden">
-      <div className="p-4 border-b border-white/10 flex justify-between items-center shrink-0 backdrop-blur-xl">
+      <div className="p-4 border-b border-white/10 flex justify-between items-center shrink-0 backdrop-blur-xl bg-black/40">
         <div>
           <h1 className="text-xl font-bold">
             {connected
@@ -245,10 +273,25 @@ export default function Home() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{
+          duration: 0.4,
+        }}
+        className="flex-1 overflow-y-auto p-4 space-y-4"
+      >
         {messages.map((msg, index) => (
-          <div
+          <motion.div
             key={index}
+            initial={{
+              opacity: 0,
+              y: 10,
+            }}
+            animate={{
+              opacity: 1,
+              y: 0,
+            }}
             className={`flex ${
               msg.sender === socket.id
                 ? "justify-end"
@@ -269,11 +312,11 @@ export default function Home() {
                     ? "/female.jpg"
                     : "/male.jpg"
                 }
-                className="w-10 h-10 rounded-full object-cover shrink-0 mt-1"
+                className="w-10 h-10 rounded-full object-cover shrink-0 mt-1 border border-white/10"
               />
 
               <div
-                className={`rounded-3xl px-4 py-3 ${
+                className={`rounded-3xl px-4 py-3 transition-all hover:scale-[1.01] ${
                   msg.sender === socket.id
                     ? "bg-purple-600"
                     : "bg-white/10"
@@ -315,13 +358,29 @@ export default function Home() {
                 <p className="break-words whitespace-pre-wrap">
                   {msg.text}
                 </p>
+
+                <p className="text-[10px] text-white/40 mt-2 text-right">
+                  {msg.timestamp
+                    ? new Date(
+                        msg.timestamp
+                      ).toLocaleTimeString(
+                        [],
+                        {
+                          hour:
+                            "2-digit",
+                          minute:
+                            "2-digit",
+                        }
+                      )
+                    : ""}
+                </p>
               </div>
             </div>
-          </div>
+          </motion.div>
         ))}
 
         <div ref={messagesEndRef} />
-      </div>
+      </motion.div>
 
       <div className="shrink-0 border-t border-white/10 bg-black/90 backdrop-blur-xl p-3">
         {replyingTo && (
@@ -367,7 +426,7 @@ export default function Home() {
               }
             }}
             placeholder="Type message..."
-            className="flex-1 bg-white/10 rounded-2xl px-5 py-4 outline-none"
+            className="flex-1 bg-white/10 rounded-2xl px-5 py-4 outline-none border border-white/10"
           />
 
           <button
