@@ -20,7 +20,8 @@ const socket = io(
 );
 
 export default function Home() {
-  const [nickname, setNickname] = useState("");
+  const [nickname, setNickname] =
+    useState("");
 
   const [gender, setGender] =
     useState("male");
@@ -31,13 +32,17 @@ export default function Home() {
   const [messages, setMessages] =
     useState<any[]>([]);
 
-  const [input, setInput] = useState("");
+  const [input, setInput] =
+    useState("");
 
   const [connected, setConnected] =
     useState(false);
 
   const [typing, setTyping] =
     useState(false);
+
+  const [onlineCount, setOnlineCount] =
+    useState(0);
 
   const [replyingTo, setReplyingTo] =
     useState<any>(null);
@@ -71,6 +76,13 @@ export default function Home() {
       }, 1200);
     });
 
+    socket.on(
+      "online_count",
+      (count) => {
+        setOnlineCount(count);
+      }
+    );
+
     return () => {
       socket.off("matched");
 
@@ -79,6 +91,8 @@ export default function Home() {
       socket.off("stranger_left");
 
       socket.off("typing");
+
+      socket.off("online_count");
     };
   }, []);
 
@@ -135,12 +149,13 @@ export default function Home() {
     return (
       <main className="h-screen bg-black text-white flex items-center justify-center px-6">
         <div className="w-full max-w-md bg-white/5 border border-white/10 p-8 rounded-3xl backdrop-blur-xl">
-          <h1 className="text-4xl font-bold mb-3">
-            VEIL
+          <h1 className="text-5xl font-black mb-3 tracking-wide">
+            VIBE
           </h1>
 
           <p className="text-white/60 mb-8">
-            Anonymous conversations.
+            Real conversations with
+            real people.
           </p>
 
           <input
@@ -188,6 +203,10 @@ export default function Home() {
           >
             Start Chatting
           </button>
+
+          <div className="text-center text-white/30 text-xs mt-6">
+            PROUDLY MADE IN INDIA 🇮🇳
+          </div>
         </div>
       </main>
     );
@@ -203,11 +222,19 @@ export default function Home() {
               : "Finding Stranger..."}
           </h1>
 
-          {typing && (
-            <p className="text-xs text-white/40 mt-1">
-              typing...
+          <div className="flex items-center gap-2 mt-1">
+            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+
+            <p className="text-xs text-white/40">
+              {onlineCount} online
             </p>
-          )}
+
+            {typing && (
+              <p className="text-xs text-white/40">
+                • typing...
+              </p>
+            )}
+          </div>
         </div>
 
         <button
