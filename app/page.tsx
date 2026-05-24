@@ -6,22 +6,66 @@ import {
   useState,
 } from "react";
 
-import { io } from "socket.io-client";
+import { io, Socket } from "socket.io-client";
 
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 
 import {
   Send,
   SkipForward,
   Reply,
   X,
+  Users,
+  Sparkles,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 
-const socket = io(
-  "https://vibe-backend-xexf.onrender.com"
-);
+/*
+  SOCKET
+*/
+
+const SOCKET_URL =
+  "https://vibe-backend-xexf.onrender.com";
+
+/*
+  TYPES
+*/
+
+interface Message {
+  id: number;
+  text: string;
+  nickname: string;
+  gender?: string;
+  sender?: string;
+  timestamp?: string;
+  replyTo?: {
+    text: string;
+    nickname: string;
+  } | null;
+}
+
+interface ClubUser {
+  id: string;
+  nickname: string;
+  bio: string;
+  avatar: string;
+}
 
 export default function Home() {
+  const socketRef =
+    useRef<Socket | null>(null);
+
+  const messagesEndRef =
+    useRef<HTMLDivElement>(null);
+
+  const clubMessagesEndRef =
+    useRef<HTMLDivElement>(null);
+
+  /*
+    USER
+  */
+
   const [nickname, setNickname] =
     useState("");
 
@@ -31,58 +75,134 @@ export default function Home() {
   const [joined, setJoined] =
     useState(false);
 
-  const [messages, setMessages] =
-    useState<any[]>([]);
-
-  const [input, setInput] =
-    useState("");
+  /*
+    CONNECTION
+  */
 
   const [connected, setConnected] =
     useState(false);
 
-  const [typing, setTyping] =
+  const [serverConnected, setServerConnected] =
     useState(false);
 
   const [onlineCount, setOnlineCount] =
     useState(0);
 
-  const [replyingTo, setReplyingTo] =
-    useState<any>(null);
+  /*
+    RANDOM CHAT
+  */
 
-  const messagesEndRef =
-    useRef<HTMLDivElement>(null);
+  const [messages, setMessages] =
+    useState<Message[]>([]);
+
+  const [input, setInput] =
+    useState("");
+
+  const [typing, setTyping] =
+    useState(false);
+
+  const [replyingTo, setReplyingTo] =
+    useState<Message | null>(null);
+
+  /*
+    CLUB
+  */
+
+  const [clubMessages, setClubMessages] =
+    useState<Message[]>([]);
+
+  const [clubUsers, setClubUsers] =
+    useState<ClubUser[]>([]);
+
+  const [clubInput, setClubInput] =
+    useState("");
+
+  const [clubTyping, setClubTyping] =
+    useState("");
+
+  /*
+    UI
+  */
+
+  const [activeTab, setActiveTab] =
+    useState("random");
+
+  /*
+    AUDIO
+  */
 
   const matchSound =
-    typeof Audio !== "undefined"
-      ? new Audio("/match.mp3")
-      : null;
+    useRef<HTMLAudioElement | null>(
+      null
+    );
 
   const messageSound =
-    typeof Audio !== "undefined"
-      ? new Audio("/message.mp3")
-      : null;
+    useRef<HTMLAudioElement | null>(
+      null
+    );
+
+  /*
+    INIT SOCKET
+  */
 
   useEffect(() => {
+    const socket = io(SOCKET_URL, {
+      transports: ["websocket"],
+      reconnection: true,
+      reconnectionAttempts: 999,
+      reconnectionDelay: 1000,
+    });
+
+    socketRef.current = socket;
+
+    matchSound.current =
+      new Audio("/match.mp3");
+
+    messageSound.current =
+      new Audio("/message.mp3");
+
+    /*
+      CONNECTION
+    */
+
+    socket.on("connect", () => {
+      setServerConnected(true);
+    });
+
+    socket.on("disconnect", () => {
+      setServerConnected(false);
+    });
+
+    /*
+      RANDOM EVENTS
+    */
+
     socket.on("matched", () => {
       setConnected(true);
 
       setMessages([]);
 
-      matchSound?.play();
+      matchSound.current?.play();
     });
 
-    socket.on("message", (data) => {
-      setMessages((prev) => [
-        ...prev,
-        data,
-      ]);
+    socket.on(
+      "message",
+      (data: Message) => {
+        setMessages((prev) => [
+          ...prev,
+          data,
+        ]);
 
-      messageSound?.play();
-    });
+        messageSound.current?.play();
+      }
+    );
 
-    socket.on("stranger_left", () => {
-      setConnected(false);
-    });
+    socket.on(
+      "stranger_left",
+      () => {
+        setConnected(false);
+      }
+    );
 
     socket.on("typing", () => {
       setTyping(true);
@@ -92,98 +212,216 @@ export default function Home() {
       }, 1200);
     });
 
+    /*
+      ONLINE
+    */
+
     socket.on(
       "online_count",
-      (count) => {
+      (count: number) => {
         setOnlineCount(count);
       }
     );
 
+    /*
+      CLUB
+    */
+
+    socket.on(
+      "club_message",
+      (data: Message) => {
+        setClubMessages((prev) => [
+          ...prev,
+          data,
+        ]);
+      }
+    );
+
+    socket.on(
+      "club_old_messages",
+      (messages: Message[]) => {
+        setClubMessages(messages);
+      }
+    );
+
+    socket.on(
+      "club_online_users",
+      (users: ClubUser[]) => {
+        setClubUsers(users);
+      }
+    );
+
+    socket.on(
+      "club_typing",
+      (data) => {
+        setClubTyping(
+          `${data.nickname} typing...`
+        );
+
+        setTimeout(() => {
+          setClubTyping("");
+        }, 1500);
+      }
+    );
+
     return () => {
-      socket.off("matched");
-
-      socket.off("message");
-
-      socket.off("stranger_left");
-
-      socket.off("typing");
-
-      socket.off("online_count");
+      socket.disconnect();
     };
   }, []);
 
+  /*
+    AUTOSCROLL
+  */
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({
-      behavior: "smooth",
-    });
+    messagesEndRef.current?.scrollIntoView(
+      {
+        behavior: "smooth",
+      }
+    );
   }, [messages]);
+
+  useEffect(() => {
+    clubMessagesEndRef.current?.scrollIntoView(
+      {
+        behavior: "smooth",
+      }
+    );
+  }, [clubMessages]);
+
+  /*
+    JOIN
+  */
 
   const joinChat = () => {
     if (!nickname.trim()) return;
 
-    socket.emit("join", {
+    socketRef.current?.emit("join", {
       nickname,
       gender,
     });
 
+    socketRef.current?.emit(
+      "join_club",
+      {
+        nickname,
+        bio: "VIBE member 🌌",
+        avatar:
+          gender === "female"
+            ? "/female.jpg"
+            : "/male.jpg",
+      }
+    );
+
     setJoined(true);
   };
+
+  /*
+    RANDOM MESSAGE
+  */
 
   const sendMessage = () => {
     if (!input.trim()) return;
 
-    socket.emit("message", {
-      text: input,
-
-      replyTo: replyingTo
-        ? {
-            text: replyingTo.text,
-            nickname:
-              replyingTo.nickname,
-          }
-        : null,
-    });
+    socketRef.current?.emit(
+      "message",
+      {
+        text: input.trim(),
+        replyTo: replyingTo
+          ? {
+              text:
+                replyingTo.text,
+              nickname:
+                replyingTo.nickname,
+            }
+          : null,
+      }
+    );
 
     setInput("");
 
     setReplyingTo(null);
   };
 
-  const nextStranger = () => {
-    socket.emit("next");
+  /*
+    CLUB MESSAGE
+  */
+
+  const sendClubMessage = () => {
+    if (!clubInput.trim()) return;
+
+    socketRef.current?.emit(
+      "club_message",
+      {
+        text: clubInput.trim(),
+      }
+    );
+
+    setClubInput("");
   };
+
+  /*
+    NEXT
+  */
+
+  const nextStranger = () => {
+    setMessages([]);
+
+    setConnected(false);
+
+    socketRef.current?.emit("next");
+  };
+
+  /*
+    TYPING
+  */
 
   const handleTyping = (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
     setInput(e.target.value);
 
-    socket.emit("typing");
+    socketRef.current?.emit(
+      "typing"
+    );
   };
+
+  const handleClubTyping = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    setClubInput(e.target.value);
+
+    socketRef.current?.emit(
+      "club_typing"
+    );
+  };
+
+  /*
+    JOIN SCREEN
+  */
 
   if (!joined) {
     return (
-      <main className="h-screen bg-black text-white flex items-center justify-center px-6 overflow-hidden">
+      <main className="min-h-screen bg-black text-white flex items-center justify-center px-6 overflow-hidden relative">
         <div className="absolute inset-0 bg-purple-500/10 blur-3xl" />
 
         <motion.div
           initial={{
             opacity: 0,
-            y: 20,
+            scale: 0.95,
           }}
           animate={{
             opacity: 1,
-            y: 0,
+            scale: 1,
           }}
           className="relative w-full max-w-md bg-white/5 border border-white/10 p-8 rounded-3xl backdrop-blur-2xl"
         >
-          <h1 className="text-5xl font-black mb-3 tracking-[0.3em] text-center">
+          <h1 className="text-5xl font-black tracking-[0.3em] text-center">
             VIBE
           </h1>
 
-          <p className="text-white/60 mb-8 text-center">
-            Real conversations with
-            real people.
+          <p className="text-center text-white/50 mt-4 mb-8">
+            Meet strangers across the digital galaxy ✦
           </p>
 
           <input
@@ -194,7 +432,7 @@ export default function Home() {
               )
             }
             placeholder="Choose nickname"
-            className="w-full bg-white/10 rounded-2xl px-5 py-4 outline-none mb-4 border border-white/10"
+            className="w-full bg-white/10 border border-white/10 rounded-2xl px-5 py-4 outline-none mb-4"
           />
 
           <div className="flex gap-3 mb-5">
@@ -202,7 +440,7 @@ export default function Home() {
               onClick={() =>
                 setGender("male")
               }
-              className={`flex-1 py-3 rounded-2xl transition-all ${
+              className={`flex-1 py-3 rounded-2xl ${
                 gender === "male"
                   ? "bg-blue-600"
                   : "bg-white/10"
@@ -213,10 +451,13 @@ export default function Home() {
 
             <button
               onClick={() =>
-                setGender("female")
+                setGender(
+                  "female"
+                )
               }
-              className={`flex-1 py-3 rounded-2xl transition-all ${
-                gender === "female"
+              className={`flex-1 py-3 rounded-2xl ${
+                gender ===
+                "female"
                   ? "bg-pink-600"
                   : "bg-white/10"
               }`}
@@ -227,220 +468,365 @@ export default function Home() {
 
           <button
             onClick={joinChat}
-            className="w-full bg-purple-600 hover:bg-purple-700 py-4 rounded-2xl font-semibold transition-all"
+            className="w-full bg-purple-600 hover:bg-purple-700 py-4 rounded-2xl font-semibold"
           >
-            Start Chatting
+            Enter VIBE
           </button>
-
-          <div className="text-center text-white/30 text-xs mt-6">
-            PROUDLY MADE IN INDIA 🇮🇳
-          </div>
         </motion.div>
       </main>
     );
   }
 
+  /*
+    MAIN
+  */
+
   return (
     <main className="h-screen bg-black text-white flex flex-col overflow-hidden">
-      <div className="p-4 border-b border-white/10 flex justify-between items-center shrink-0 backdrop-blur-xl bg-black/40">
+      {/* TOPBAR */}
+
+      <div className="p-4 border-b border-white/10 flex items-center justify-between bg-black/40 backdrop-blur-xl">
         <div>
-          <h1 className="text-xl font-bold">
-            {connected
-              ? "Stranger Connected"
-              : "Finding Stranger..."}
+          <h1 className="text-2xl font-black tracking-widest">
+            VIBE
           </h1>
 
-          <div className="flex items-center gap-2 mt-1">
-            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+          <div className="flex items-center gap-3 mt-1">
+            <div className="flex items-center gap-1 text-xs text-white/50">
+              {serverConnected ? (
+                <Wifi
+                  size={14}
+                />
+              ) : (
+                <WifiOff
+                  size={14}
+                />
+              )}
 
-            <p className="text-xs text-white/40">
+              {serverConnected
+                ? "Connected"
+                : "Offline"}
+            </div>
+
+            <div className="text-xs text-white/40">
               {onlineCount} online
-            </p>
-
-            {typing && (
-              <p className="text-xs text-white/40">
-                • typing...
-              </p>
-            )}
+            </div>
           </div>
         </div>
 
-        <button
-          onClick={nextStranger}
-          className="bg-white/10 hover:bg-white/20 p-3 rounded-2xl transition-all"
-        >
-          <SkipForward size={18} />
-        </button>
-      </div>
-
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{
-          duration: 0.4,
-        }}
-        className="flex-1 overflow-y-auto p-4 space-y-4"
-      >
-        {messages.map((msg, index) => (
-          <motion.div
-            key={index}
-            initial={{
-              opacity: 0,
-              y: 10,
-            }}
-            animate={{
-              opacity: 1,
-              y: 0,
-            }}
-            className={`flex ${
-              msg.sender === socket.id
-                ? "justify-end"
-                : "justify-start"
+        <div className="flex gap-2">
+          <button
+            onClick={() =>
+              setActiveTab(
+                "random"
+              )
+            }
+            className={`px-4 py-2 rounded-2xl ${
+              activeTab ===
+              "random"
+                ? "bg-purple-600"
+                : "bg-white/10"
             }`}
           >
-            <div
-              className={`flex gap-3 max-w-[90%] ${
-                msg.sender === socket.id
-                  ? "flex-row-reverse"
-                  : ""
-              }`}
-            >
-              <img
-                src={
-                  msg.gender ===
-                  "female"
-                    ? "/female.jpg"
-                    : "/male.jpg"
-                }
-                className="w-10 h-10 rounded-full object-cover shrink-0 mt-1 border border-white/10"
-              />
+            Random
+          </button>
 
-              <div
-                className={`rounded-3xl px-4 py-3 transition-all hover:scale-[1.01] ${
-                  msg.sender === socket.id
-                    ? "bg-purple-600"
-                    : "bg-white/10"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-4 mb-1">
-                  <p className="text-xs text-white/50">
-                    {msg.nickname}
-                  </p>
+          <button
+            onClick={() =>
+              setActiveTab("club")
+            }
+            className={`px-4 py-2 rounded-2xl flex items-center gap-2 ${
+              activeTab ===
+              "club"
+                ? "bg-purple-600"
+                : "bg-white/10"
+            }`}
+          >
+            <Users size={15} />
+            Club
+          </button>
+        </div>
+      </div>
 
-                  <button
-                    onClick={() =>
-                      setReplyingTo(msg)
-                    }
-                    className="text-white/40 hover:text-white transition-all"
-                  >
-                    <Reply size={14} />
-                  </button>
-                </div>
+      {/* RANDOM */}
 
-                {msg.replyTo && (
-                  <div className="bg-black/30 rounded-2xl px-3 py-2 mb-2 border-l-2 border-purple-400">
-                    <p className="text-xs text-purple-300 mb-1">
-                      {
-                        msg.replyTo
-                          .nickname
-                      }
-                    </p>
-
-                    <p className="text-xs text-white/50 line-clamp-2 break-words">
-                      {
-                        msg.replyTo
-                          .text
-                      }
-                    </p>
-                  </div>
-                )}
-
-                <p className="break-words whitespace-pre-wrap">
-                  {msg.text}
-                </p>
-
-                <p className="text-[10px] text-white/40 mt-2 text-right">
-                  {msg.timestamp
-                    ? new Date(
-                        msg.timestamp
-                      ).toLocaleTimeString(
-                        [],
-                        {
-                          hour:
-                            "2-digit",
-                          minute:
-                            "2-digit",
-                        }
-                      )
-                    : ""}
-                </p>
-              </div>
-            </div>
-          </motion.div>
-        ))}
-
-        <div ref={messagesEndRef} />
-      </motion.div>
-
-      <div className="shrink-0 border-t border-white/10 bg-black/90 backdrop-blur-xl p-3">
-        {replyingTo && (
-          <div className="mb-3 bg-white/10 rounded-2xl px-4 py-3 flex items-center justify-between">
+      {activeTab === "random" && (
+        <>
+          <div className="p-4 border-b border-white/10 flex justify-between items-center">
             <div>
-              <p className="text-xs text-white/40">
-                Replying to
-              </p>
+              <h1 className="font-semibold text-lg">
+                {connected
+                  ? "Stranger Connected"
+                  : "Searching Stranger..."}
+              </h1>
 
-              <p className="text-xs text-purple-300">
-                {
-                  replyingTo.nickname
-                }
-              </p>
-
-              <p className="text-sm truncate max-w-[220px]">
-                {replyingTo.text}
-              </p>
+              <AnimatePresence>
+                {typing && (
+                  <motion.p
+                    initial={{
+                      opacity: 0,
+                    }}
+                    animate={{
+                      opacity: 1,
+                    }}
+                    exit={{
+                      opacity: 0,
+                    }}
+                    className="text-xs text-white/40 mt-1"
+                  >
+                    typing...
+                  </motion.p>
+                )}
+              </AnimatePresence>
             </div>
 
             <button
-              onClick={() =>
-                setReplyingTo(null)
+              onClick={
+                nextStranger
               }
-              className="text-white/50 hover:text-white"
+              className="bg-white/10 hover:bg-white/20 p-3 rounded-2xl"
             >
-              <X size={16} />
+              <SkipForward
+                size={18}
+              />
             </button>
           </div>
-        )}
 
-        <div className="flex gap-3 items-end">
-          <input
-            value={input}
-            onChange={handleTyping}
-            onKeyDown={(e) => {
-              if (
-                e.key === "Enter"
-              ) {
-                e.preventDefault();
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {messages.map((msg) => (
+              <motion.div
+                key={msg.id}
+                initial={{
+                  opacity: 0,
+                  y: 10,
+                }}
+                animate={{
+                  opacity: 1,
+                  y: 0,
+                }}
+                className={`flex ${
+                  msg.sender ===
+                  socketRef.current?.id
+                    ? "justify-end"
+                    : "justify-start"
+                }`}
+              >
+                <div
+                  className={`max-w-[85%] rounded-3xl px-4 py-3 ${
+                    msg.sender ===
+                    socketRef.current?.id
+                      ? "bg-purple-600"
+                      : "bg-white/10"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-4 mb-1">
+                    <p className="text-xs text-white/50">
+                      {msg.nickname}
+                    </p>
 
-                sendMessage();
-              }
-            }}
-            placeholder="Type message..."
-            className="flex-1 bg-white/10 rounded-2xl px-5 py-4 outline-none border border-white/10"
-          />
+                    <button
+                      onClick={() =>
+                        setReplyingTo(
+                          msg
+                        )
+                      }
+                    >
+                      <Reply
+                        size={14}
+                      />
+                    </button>
+                  </div>
 
-          <button
-            onClick={sendMessage}
-            className="bg-purple-600 hover:bg-purple-700 p-4 rounded-2xl shrink-0 transition-all"
-          >
-            <Send size={18} />
-          </button>
+                  {msg.replyTo && (
+                    <div className="bg-black/30 rounded-2xl px-3 py-2 mb-2 border-l-2 border-purple-400">
+                      <p className="text-xs text-purple-300">
+                        {
+                          msg.replyTo
+                            .nickname
+                        }
+                      </p>
+
+                      <p className="text-xs text-white/50">
+                        {
+                          msg.replyTo
+                            .text
+                        }
+                      </p>
+                    </div>
+                  )}
+
+                  <p className="break-words">
+                    {msg.text}
+                  </p>
+                </div>
+              </motion.div>
+            ))}
+
+            <div
+              ref={messagesEndRef}
+            />
+          </div>
+
+          <div className="p-3 border-t border-white/10 bg-black/80">
+            {replyingTo && (
+              <div className="mb-3 bg-white/10 rounded-2xl px-4 py-3 flex justify-between">
+                <div>
+                  <p className="text-xs text-white/40">
+                    Replying to
+                  </p>
+
+                  <p className="text-xs text-purple-300">
+                    {
+                      replyingTo.nickname
+                    }
+                  </p>
+                </div>
+
+                <button
+                  onClick={() =>
+                    setReplyingTo(
+                      null
+                    )
+                  }
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <input
+                value={input}
+                onChange={
+                  handleTyping
+                }
+                onKeyDown={(e) => {
+                  if (
+                    e.key ===
+                    "Enter"
+                  ) {
+                    sendMessage();
+                  }
+                }}
+                placeholder="Type message..."
+                className="flex-1 bg-white/10 rounded-2xl px-5 py-4 outline-none"
+              />
+
+              <button
+                onClick={
+                  sendMessage
+                }
+                className="bg-purple-600 hover:bg-purple-700 p-4 rounded-2xl"
+              >
+                <Send
+                  size={18}
+                />
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* CLUB */}
+
+      {activeTab === "club" && (
+        <div className="flex flex-1 overflow-hidden">
+          <div className="flex flex-col flex-1">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {clubMessages.map(
+                (msg) => (
+                  <div
+                    key={msg.id}
+                    className="bg-white/10 rounded-3xl px-4 py-3"
+                  >
+                    <p className="font-semibold text-sm">
+                      {msg.nickname}
+                    </p>
+
+                    <p className="mt-1 text-sm whitespace-pre-wrap">
+                      {msg.text}
+                    </p>
+                  </div>
+                )
+              )}
+
+              <div
+                ref={
+                  clubMessagesEndRef
+                }
+              />
+            </div>
+
+            <div className="p-3 border-t border-white/10">
+              <div className="flex gap-3">
+                <input
+                  value={clubInput}
+                  onChange={
+                    handleClubTyping
+                  }
+                  placeholder="Message club..."
+                  className="flex-1 bg-white/10 rounded-2xl px-5 py-4 outline-none"
+                />
+
+                <button
+                  onClick={
+                    sendClubMessage
+                  }
+                  className="bg-purple-600 p-4 rounded-2xl"
+                >
+                  <Send
+                    size={18}
+                  />
+                </button>
+              </div>
+
+              {clubTyping && (
+                <p className="text-xs text-white/40 mt-2">
+                  {clubTyping}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="hidden md:block w-[260px] border-l border-white/10 bg-white/5 overflow-y-auto">
+            <div className="p-4 border-b border-white/10">
+              <h2 className="font-semibold">
+                Members
+              </h2>
+            </div>
+
+            <div className="p-4 space-y-4">
+              {clubUsers.map(
+                (user) => (
+                  <div
+                    key={user.id}
+                    className="flex items-center gap-3"
+                  >
+                    <img
+                      src={
+                        user.avatar
+                      }
+                      className="w-12 h-12 rounded-full object-cover"
+                    />
+
+                    <div>
+                      <p className="font-medium">
+                        {
+                          user.nickname
+                        }
+                      </p>
+
+                      <p className="text-xs text-white/40">
+                        {user.bio}
+                      </p>
+                    </div>
+                  </div>
+                )
+              )}
+            </div>
+          </div>
         </div>
-
-        <div className="text-center text-white/20 text-xs mt-3">
-          Built by WELOX & CO ✦
-        </div>
-      </div>
+      )}
     </main>
   );
 }
