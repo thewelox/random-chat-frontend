@@ -1,832 +1,265 @@
 "use client";
 
-import {
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { io } from "socket.io-client";
+import { Bell, Compass, Home, MessageCircle, PlusSquare, Search, Settings, Shield, Sparkles, Users } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { api, endpoints } from "@/lib/api";
 
-import { io, Socket } from "socket.io-client";
+const socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001", {
+  autoConnect: false,
+  transports: ["websocket"],
+});
 
-import { motion, AnimatePresence } from "framer-motion";
+type AuthMode = "login" | "signup";
 
-import {
-  Send,
-  SkipForward,
-  Reply,
-  X,
-  Users,
-  Sparkles,
-  Wifi,
-  WifiOff,
-} from "lucide-react";
-
-/*
-  SOCKET
-*/
-
-const SOCKET_URL =
-  "https://vibe-backend-xexf.onrender.com";
-
-/*
-  TYPES
-*/
-
-interface Message {
-  id: number;
-  text: string;
-  nickname: string;
-  gender?: string;
-  sender?: string;
-  timestamp?: string;
-  replyTo?: {
-    text: string;
-    nickname: string;
-  } | null;
+interface FeedPost {
+  _id: string;
+  content: string;
+  likes: string[];
+  comments: { _id: string }[];
+  createdAt: string;
+  userId?: { username: string; nickname: string; avatar?: string; verified?: boolean };
 }
 
-interface ClubUser {
-  id: string;
-  nickname: string;
-  bio: string;
-  avatar: string;
-}
+export default function HomePage() {
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [token, setToken] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("vibe_token") || "";
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [feed, setFeed] = useState<FeedPost[]>([]);
+  const [notificationsCount, setNotificationsCount] = useState(0);
+  const [online, setOnline] = useState(false);
+  const [activeTab, setActiveTab] = useState("feed");
+  const [form, setForm] = useState({ username: "", nickname: "", identifier: "", email: "", password: "", rememberMe: true });
+  const [newPost, setNewPost] = useState("");
 
-export default function Home() {
-  const socketRef =
-    useRef<Socket | null>(null);
-
-  const messagesEndRef =
-    useRef<HTMLDivElement>(null);
-
-  const clubMessagesEndRef =
-    useRef<HTMLDivElement>(null);
-
-  /*
-    USER
-  */
-
-  const [nickname, setNickname] =
-    useState("");
-
-  const [gender, setGender] =
-    useState("male");
-
-  const [joined, setJoined] =
-    useState(false);
-
-  /*
-    CONNECTION
-  */
-
-  const [connected, setConnected] =
-    useState(false);
-
-  const [serverConnected, setServerConnected] =
-    useState(false);
-
-  const [onlineCount, setOnlineCount] =
-    useState(0);
-
-  /*
-    RANDOM CHAT
-  */
-
-  const [messages, setMessages] =
-    useState<Message[]>([]);
-
-  const [input, setInput] =
-    useState("");
-
-  const [typing, setTyping] =
-    useState(false);
-
-  const [replyingTo, setReplyingTo] =
-    useState<Message | null>(null);
-
-  /*
-    CLUB
-  */
-
-  const [clubMessages, setClubMessages] =
-    useState<Message[]>([]);
-
-  const [clubUsers, setClubUsers] =
-    useState<ClubUser[]>([]);
-
-  const [clubInput, setClubInput] =
-    useState("");
-
-  const [clubTyping, setClubTyping] =
-    useState("");
-
-  /*
-    UI
-  */
-
-  const [activeTab, setActiveTab] =
-    useState("random");
-
-  /*
-    AUDIO
-  */
-
-  const matchSound =
-    useRef<HTMLAudioElement | null>(
-      null
-    );
-
-  const messageSound =
-    useRef<HTMLAudioElement | null>(
-      null
-    );
-
-  /*
-    INIT SOCKET
-  */
+  const navItems = useMemo(
+    () => [
+      { id: "feed", label: "Home Feed", icon: Home },
+      { id: "explore", label: "Explore", icon: Compass },
+      { id: "clubs", label: "Clubs", icon: Users },
+      { id: "chat", label: "Realtime Chat", icon: MessageCircle },
+      { id: "moderation", label: "Safety", icon: Shield },
+      { id: "settings", label: "Settings", icon: Settings },
+    ],
+    []
+  );
 
   useEffect(() => {
-    const socket = io(SOCKET_URL, {
-      transports: ["websocket"],
-      reconnection: true,
-      reconnectionAttempts: 999,
-      reconnectionDelay: 1000,
-    });
+    if (!token) return;
 
-    socketRef.current = socket;
+    const handleConnect = () => setOnline(true);
+    const handleDisconnect = () => setOnline(false);
 
-    matchSound.current =
-      new Audio("/match.mp3");
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.connect();
+    socket.emit("presence:online", { userId: token.slice(0, 12) });
 
-    messageSound.current =
-      new Audio("/message.mp3");
-
-    /*
-      CONNECTION
-    */
-
-    socket.on("connect", () => {
-      setServerConnected(true);
-    });
-
-    socket.on("disconnect", () => {
-      setServerConnected(false);
-    });
-
-    /*
-      RANDOM EVENTS
-    */
-
-    socket.on("matched", () => {
-      setConnected(true);
-
-      setMessages([]);
-
-      matchSound.current?.play();
-    });
-
-    socket.on(
-      "message",
-      (data: Message) => {
-        setMessages((prev) => [
-          ...prev,
-          data,
-        ]);
-
-        messageSound.current?.play();
-      }
-    );
-
-    socket.on(
-      "stranger_left",
-      () => {
-        setConnected(false);
-      }
-    );
-
-    socket.on("typing", () => {
-      setTyping(true);
-
-      setTimeout(() => {
-        setTyping(false);
-      }, 1200);
-    });
-
-    /*
-      ONLINE
-    */
-
-    socket.on(
-      "online_count",
-      (count: number) => {
-        setOnlineCount(count);
-      }
-    );
-
-    /*
-      CLUB
-    */
-
-    socket.on(
-      "club_message",
-      (data: Message) => {
-        setClubMessages((prev) => [
-          ...prev,
-          data,
-        ]);
-      }
-    );
-
-    socket.on(
-      "club_old_messages",
-      (messages: Message[]) => {
-        setClubMessages(messages);
-      }
-    );
-
-    socket.on(
-      "club_online_users",
-      (users: ClubUser[]) => {
-        setClubUsers(users);
-      }
-    );
-
-    socket.on(
-      "club_typing",
-      (data) => {
-        setClubTyping(
-          `${data.nickname} typing...`
-        );
-
-        setTimeout(() => {
-          setClubTyping("");
-        }, 1500);
-      }
-    );
+    void loadFeed(token);
+    void loadNotifications(token);
 
     return () => {
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
       socket.disconnect();
     };
-  }, []);
+  }, [token]);
 
-  /*
-    AUTOSCROLL
-  */
+  async function loadFeed(currentToken: string) {
+    try {
+      const data = await api<{ posts: FeedPost[] }>(endpoints.feed, { token: currentToken });
+      setFeed(data.posts || []);
+    } catch (err) {
+      console.error(err);
+    }
+  }
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView(
-      {
-        behavior: "smooth",
-      }
-    );
-  }, [messages]);
+  async function loadNotifications(currentToken: string) {
+    try {
+      const data = await api<{ notifications: Array<{ isRead: boolean }> }>(endpoints.notifications, { token: currentToken });
+      setNotificationsCount((data.notifications || []).filter((n) => !n.isRead).length);
+    } catch {
+      setNotificationsCount(0);
+    }
+  }
 
-  useEffect(() => {
-    clubMessagesEndRef.current?.scrollIntoView(
-      {
-        behavior: "smooth",
-      }
-    );
-  }, [clubMessages]);
+  async function handleAuth(e: FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
 
-  /*
-    JOIN
-  */
+    try {
+      const payload =
+        authMode === "signup"
+          ? { username: form.username, nickname: form.nickname, email: form.email, password: form.password }
+          : { identifier: form.identifier, password: form.password };
 
-  const joinChat = () => {
-    if (!nickname.trim()) return;
+      const endpoint = authMode === "signup" ? endpoints.signup : endpoints.login;
+      const data = await api<{ token: string }>(endpoint, { method: "POST", body: payload });
 
-    socketRef.current?.emit("join", {
-      nickname,
-      gender,
-    });
+      setToken(data.token);
+      if (form.rememberMe) localStorage.setItem("vibe_token", data.token);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Authentication failed");
+    } finally {
+      setLoading(false);
+    }
+  }
 
-    socketRef.current?.emit(
-      "join_club",
-      {
-        nickname,
-        bio: "VIBE member 🌌",
-        avatar:
-          gender === "female"
-            ? "/female.jpg"
-            : "/male.jpg",
-      }
-    );
+  async function createPost() {
+    if (!newPost.trim() || !token) return;
+    try {
+      await api(endpoints.createPost, { method: "POST", token, body: { content: newPost, postType: "text" } });
+      setNewPost("");
+      await loadFeed(token);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Post failed");
+    }
+  }
 
-    setJoined(true);
-  };
+  function logout() {
+    setToken("");
+    localStorage.removeItem("vibe_token");
+  }
 
-  /*
-    RANDOM MESSAGE
-  */
-
-  const sendMessage = () => {
-    if (!input.trim()) return;
-
-    socketRef.current?.emit(
-      "message",
-      {
-        text: input.trim(),
-        replyTo: replyingTo
-          ? {
-              text:
-                replyingTo.text,
-              nickname:
-                replyingTo.nickname,
-            }
-          : null,
-      }
-    );
-
-    setInput("");
-
-    setReplyingTo(null);
-  };
-
-  /*
-    CLUB MESSAGE
-  */
-
-  const sendClubMessage = () => {
-    if (!clubInput.trim()) return;
-
-    socketRef.current?.emit(
-      "club_message",
-      {
-        text: clubInput.trim(),
-      }
-    );
-
-    setClubInput("");
-  };
-
-  /*
-    NEXT
-  */
-
-  const nextStranger = () => {
-    setMessages([]);
-
-    setConnected(false);
-
-    socketRef.current?.emit("next");
-  };
-
-  /*
-    TYPING
-  */
-
-  const handleTyping = (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    setInput(e.target.value);
-
-    socketRef.current?.emit(
-      "typing"
-    );
-  };
-
-  const handleClubTyping = (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    setClubInput(e.target.value);
-
-    socketRef.current?.emit(
-      "club_typing"
-    );
-  };
-
-  /*
-    JOIN SCREEN
-  */
-
-  if (!joined) {
+  if (!token) {
     return (
-      <main className="min-h-screen bg-black text-white flex items-center justify-center px-6 overflow-hidden relative">
-        <div className="absolute inset-0 bg-purple-500/10 blur-3xl" />
+      <main className="min-h-screen px-5 py-10 md:px-10 flex items-center justify-center">
+        <motion.section initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} className="glass vibe-shadow w-full max-w-md rounded-3xl p-7">
+          <p className="text-xs uppercase tracking-[0.2em] text-purple-300">Created by WELOX & CO</p>
+          <h1 className="mt-2 text-4xl font-black tracking-tight">VIBE</h1>
+          <p className="text-sm text-white/60 mt-2">Meet. Chat. Connect.</p>
 
-        <motion.div
-          initial={{
-            opacity: 0,
-            scale: 0.95,
-          }}
-          animate={{
-            opacity: 1,
-            scale: 1,
-          }}
-          className="relative w-full max-w-md bg-white/5 border border-white/10 p-8 rounded-3xl backdrop-blur-2xl"
-        >
-          <h1 className="text-5xl font-black tracking-[0.3em] text-center">
-            VIBE
-          </h1>
-
-          <p className="text-center text-white/50 mt-4 mb-8">
-            Meet strangers across the digital galaxy ✦
-          </p>
-
-          <input
-            value={nickname}
-            onChange={(e) =>
-              setNickname(
-                e.target.value
-              )
-            }
-            placeholder="Choose nickname"
-            className="w-full bg-white/10 border border-white/10 rounded-2xl px-5 py-4 outline-none mb-4"
-          />
-
-          <div className="flex gap-3 mb-5">
-            <button
-              onClick={() =>
-                setGender("male")
-              }
-              className={`flex-1 py-3 rounded-2xl ${
-                gender === "male"
-                  ? "bg-blue-600"
-                  : "bg-white/10"
-              }`}
-            >
-              Male
-            </button>
-
-            <button
-              onClick={() =>
-                setGender(
-                  "female"
-                )
-              }
-              className={`flex-1 py-3 rounded-2xl ${
-                gender ===
-                "female"
-                  ? "bg-pink-600"
-                  : "bg-white/10"
-              }`}
-            >
-              Female
-            </button>
+          <div className="mt-5 flex gap-2 rounded-2xl bg-black/30 p-1">
+            <button className={`flex-1 rounded-xl py-2 text-sm ${authMode === "login" ? "bg-purple-600" : "text-white/70"}`} onClick={() => setAuthMode("login")}>Login</button>
+            <button className={`flex-1 rounded-xl py-2 text-sm ${authMode === "signup" ? "bg-purple-600" : "text-white/70"}`} onClick={() => setAuthMode("signup")}>Signup</button>
           </div>
 
-          <button
-            onClick={joinChat}
-            className="w-full bg-purple-600 hover:bg-purple-700 py-4 rounded-2xl font-semibold"
-          >
-            Enter VIBE
-          </button>
-        </motion.div>
+          <form onSubmit={handleAuth} className="mt-5 space-y-3">
+            {authMode === "signup" && (
+              <>
+                <input className="w-full rounded-2xl bg-white/10 px-4 py-3 outline-none" placeholder="@username" value={form.username} onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))} />
+                <input className="w-full rounded-2xl bg-white/10 px-4 py-3 outline-none" placeholder="Nickname" value={form.nickname} onChange={(e) => setForm((p) => ({ ...p, nickname: e.target.value }))} />
+                <input className="w-full rounded-2xl bg-white/10 px-4 py-3 outline-none" placeholder="Email" type="email" value={form.email} onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))} />
+              </>
+            )}
+            {authMode === "login" && <input className="w-full rounded-2xl bg-white/10 px-4 py-3 outline-none" placeholder="Email or @username" value={form.identifier} onChange={(e) => setForm((p) => ({ ...p, identifier: e.target.value }))} />}
+            <input className="w-full rounded-2xl bg-white/10 px-4 py-3 outline-none" placeholder="Password" type="password" value={form.password} onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))} />
+            <label className="flex items-center gap-2 text-xs text-white/70"><input type="checkbox" checked={form.rememberMe} onChange={(e) => setForm((p) => ({ ...p, rememberMe: e.target.checked }))} /> Remember me</label>
+            {error && <p className="text-sm text-rose-300">{error}</p>}
+            <button disabled={loading} className="w-full rounded-2xl bg-purple-600 py-3 font-semibold hover:bg-purple-500 transition">{loading ? "Please wait..." : authMode === "login" ? "Enter VIBE" : "Create account"}</button>
+          </form>
+
+          <p className="mt-6 text-[11px] text-white/50">Email verification and password reset endpoints are scaffold-ready.</p>
+        </motion.section>
       </main>
     );
   }
 
-  /*
-    MAIN
-  */
-
   return (
-    <main className="h-screen bg-black text-white flex flex-col overflow-hidden">
-      {/* TOPBAR */}
-
-      <div className="p-4 border-b border-white/10 flex items-center justify-between bg-black/40 backdrop-blur-xl">
-        <div>
-          <h1 className="text-2xl font-black tracking-widest">
-            VIBE
-          </h1>
-
-          <div className="flex items-center gap-3 mt-1">
-            <div className="flex items-center gap-1 text-xs text-white/50">
-              {serverConnected ? (
-                <Wifi
-                  size={14}
-                />
-              ) : (
-                <WifiOff
-                  size={14}
-                />
-              )}
-
-              {serverConnected
-                ? "Connected"
-                : "Offline"}
-            </div>
-
-            <div className="text-xs text-white/40">
-              {onlineCount} online
-            </div>
+    <main className="min-h-screen p-4 md:p-6">
+      <div className="mx-auto grid max-w-7xl grid-cols-1 gap-4 md:grid-cols-[260px_1fr_320px]">
+        <aside className="glass rounded-3xl p-4">
+          <h2 className="text-2xl font-black">VIBE</h2>
+          <p className="text-xs text-white/60">Meet. Chat. Connect.</p>
+          <div className="mt-4 space-y-1">
+            {navItems.map((item) => (
+              <button key={item.id} onClick={() => setActiveTab(item.id)} className={`flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-sm transition ${activeTab === item.id ? "bg-purple-600" : "hover:bg-white/10"}`}>
+                <item.icon size={17} /> {item.label}
+              </button>
+            ))}
           </div>
-        </div>
+          <button onClick={logout} className="mt-6 w-full rounded-2xl bg-white/10 py-2 text-sm hover:bg-white/20">Logout</button>
+          <p className="mt-6 text-xs text-white/50">Built with ?? by WELOX & CO</p>
+        </aside>
 
-        <div className="flex gap-2">
-          <button
-            onClick={() =>
-              setActiveTab(
-                "random"
-              )
-            }
-            className={`px-4 py-2 rounded-2xl ${
-              activeTab ===
-              "random"
-                ? "bg-purple-600"
-                : "bg-white/10"
-            }`}
-          >
-            Random
-          </button>
-
-          <button
-            onClick={() =>
-              setActiveTab("club")
-            }
-            className={`px-4 py-2 rounded-2xl flex items-center gap-2 ${
-              activeTab ===
-              "club"
-                ? "bg-purple-600"
-                : "bg-white/10"
-            }`}
-          >
-            <Users size={15} />
-            Club
-          </button>
-        </div>
-      </div>
-
-      {/* RANDOM */}
-
-      {activeTab === "random" && (
-        <>
-          <div className="p-4 border-b border-white/10 flex justify-between items-center">
+        <section className="space-y-4">
+          <header className="glass flex items-center justify-between rounded-3xl p-4">
             <div>
-              <h1 className="font-semibold text-lg">
-                {connected
-                  ? "Stranger Connected"
-                  : "Searching Stranger..."}
-              </h1>
+              <h3 className="text-xl font-bold">{activeTab === "feed" ? "Home Feed" : activeTab[0].toUpperCase() + activeTab.slice(1)}</h3>
+              <p className="text-xs text-white/60">Premium Gen Z social experience</p>
+            </div>
+            <div className="flex items-center gap-3 text-sm">
+              <span className={`h-2.5 w-2.5 rounded-full ${online ? "bg-emerald-400" : "bg-zinc-500"}`} />
+              {online ? "Live" : "Offline"}
+            </div>
+          </header>
+
+          {activeTab === "feed" && (
+            <>
+              <div className="glass rounded-3xl p-4">
+                <div className="flex items-center gap-3 rounded-2xl bg-black/20 px-4 py-3">
+                  <PlusSquare size={18} className="text-purple-300" />
+                  <input value={newPost} onChange={(e) => setNewPost(e.target.value)} placeholder="Share your vibe... text, image, poll, or moment" className="w-full bg-transparent text-sm outline-none" />
+                  <button onClick={createPost} className="rounded-xl bg-purple-600 px-3 py-1.5 text-xs">Post</button>
+                </div>
+              </div>
 
               <AnimatePresence>
-                {typing && (
-                  <motion.p
-                    initial={{
-                      opacity: 0,
-                    }}
-                    animate={{
-                      opacity: 1,
-                    }}
-                    exit={{
-                      opacity: 0,
-                    }}
-                    className="text-xs text-white/40 mt-1"
-                  >
-                    typing...
-                  </motion.p>
-                )}
+                {feed.map((post) => (
+                  <motion.article key={post._id} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="glass rounded-3xl p-4">
+                    <div className="flex items-center justify-between text-xs text-white/60">
+                      <p>@{post.userId?.username || "viber"} ? {post.userId?.nickname || "VIBE User"}</p>
+                      <p>{new Date(post.createdAt).toLocaleString()}</p>
+                    </div>
+                    <p className="mt-3 text-sm leading-relaxed">{post.content || "No content"}</p>
+                    <div className="mt-3 flex gap-4 text-xs text-white/70">
+                      <button className="hover:text-white">Like {post.likes?.length || 0}</button>
+                      <button className="hover:text-white">Comment {post.comments?.length || 0}</button>
+                      <button className="hover:text-white">Share</button>
+                      <button className="hover:text-white">Save</button>
+                    </div>
+                  </motion.article>
+                ))}
               </AnimatePresence>
-            </div>
+            </>
+          )}
 
-            <button
-              onClick={
-                nextStranger
-              }
-              className="bg-white/10 hover:bg-white/20 p-3 rounded-2xl"
-            >
-              <SkipForward
-                size={18}
-              />
-            </button>
+          {activeTab !== "feed" && (
+            <div className="glass rounded-3xl p-5 text-sm text-white/80">
+              <p className="font-semibold">{activeTab} module is scaffolded and ready for deeper feature wiring.</p>
+              <p className="mt-2 text-white/60">Includes backend APIs/models/socket channels for chat, clubs, moderation, voice signaling, notifications, and profile systems.</p>
+            </div>
+          )}
+        </section>
+
+        <aside className="space-y-4">
+          <div className="glass rounded-3xl p-4">
+            <div className="flex items-center justify-between">
+              <h4 className="font-semibold">Notifications</h4>
+              <span className="rounded-xl bg-purple-600 px-2 py-0.5 text-xs">{notificationsCount}</span>
+            </div>
+            <ul className="mt-3 space-y-2 text-xs text-white/70">
+              <li>New follower alerts</li>
+              <li>Message mentions</li>
+              <li>Club invites and reactions</li>
+            </ul>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {messages.map((msg) => (
-              <motion.div
-                key={msg.id}
-                initial={{
-                  opacity: 0,
-                  y: 10,
-                }}
-                animate={{
-                  opacity: 1,
-                  y: 0,
-                }}
-                className={`flex ${
-                  msg.sender ===
-                  socketRef.current?.id
-                    ? "justify-end"
-                    : "justify-start"
-                }`}
-              >
-                <div
-                  className={`max-w-[85%] rounded-3xl px-4 py-3 ${
-                    msg.sender ===
-                    socketRef.current?.id
-                      ? "bg-purple-600"
-                      : "bg-white/10"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-4 mb-1">
-                    <p className="text-xs text-white/50">
-                      {msg.nickname}
-                    </p>
-
-                    <button
-                      onClick={() =>
-                        setReplyingTo(
-                          msg
-                        )
-                      }
-                    >
-                      <Reply
-                        size={14}
-                      />
-                    </button>
-                  </div>
-
-                  {msg.replyTo && (
-                    <div className="bg-black/30 rounded-2xl px-3 py-2 mb-2 border-l-2 border-purple-400">
-                      <p className="text-xs text-purple-300">
-                        {
-                          msg.replyTo
-                            .nickname
-                        }
-                      </p>
-
-                      <p className="text-xs text-white/50">
-                        {
-                          msg.replyTo
-                            .text
-                        }
-                      </p>
-                    </div>
-                  )}
-
-                  <p className="break-words">
-                    {msg.text}
-                  </p>
-                </div>
-              </motion.div>
-            ))}
-
-            <div
-              ref={messagesEndRef}
-            />
-          </div>
-
-          <div className="p-3 border-t border-white/10 bg-black/80">
-            {replyingTo && (
-              <div className="mb-3 bg-white/10 rounded-2xl px-4 py-3 flex justify-between">
-                <div>
-                  <p className="text-xs text-white/40">
-                    Replying to
-                  </p>
-
-                  <p className="text-xs text-purple-300">
-                    {
-                      replyingTo.nickname
-                    }
-                  </p>
-                </div>
-
-                <button
-                  onClick={() =>
-                    setReplyingTo(
-                      null
-                    )
-                  }
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            )}
-
-            <div className="flex gap-3">
-              <input
-                value={input}
-                onChange={
-                  handleTyping
-                }
-                onKeyDown={(e) => {
-                  if (
-                    e.key ===
-                    "Enter"
-                  ) {
-                    sendMessage();
-                  }
-                }}
-                placeholder="Type message..."
-                className="flex-1 bg-white/10 rounded-2xl px-5 py-4 outline-none"
-              />
-
-              <button
-                onClick={
-                  sendMessage
-                }
-                className="bg-purple-600 hover:bg-purple-700 p-4 rounded-2xl"
-              >
-                <Send
-                  size={18}
-                />
-              </button>
+          <div className="glass rounded-3xl p-4">
+            <h4 className="font-semibold">Explore</h4>
+            <div className="mt-3 flex items-center gap-2 rounded-2xl bg-black/20 px-3 py-2">
+              <Search size={15} className="text-white/60" />
+              <input className="w-full bg-transparent text-xs outline-none" placeholder="Search users, clubs, posts" />
             </div>
-          </div>
-        </>
-      )}
-
-      {/* CLUB */}
-
-      {activeTab === "club" && (
-        <div className="flex flex-1 overflow-hidden">
-          <div className="flex flex-col flex-1">
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {clubMessages.map(
-                (msg) => (
-                  <div
-                    key={msg.id}
-                    className="bg-white/10 rounded-3xl px-4 py-3"
-                  >
-                    <p className="font-semibold text-sm">
-                      {msg.nickname}
-                    </p>
-
-                    <p className="mt-1 text-sm whitespace-pre-wrap">
-                      {msg.text}
-                    </p>
-                  </div>
-                )
-              )}
-
-              <div
-                ref={
-                  clubMessagesEndRef
-                }
-              />
-            </div>
-
-            <div className="p-3 border-t border-white/10">
-              <div className="flex gap-3">
-                <input
-                  value={clubInput}
-                  onChange={
-                    handleClubTyping
-                  }
-                  placeholder="Message club..."
-                  className="flex-1 bg-white/10 rounded-2xl px-5 py-4 outline-none"
-                />
-
-                <button
-                  onClick={
-                    sendClubMessage
-                  }
-                  className="bg-purple-600 p-4 rounded-2xl"
-                >
-                  <Send
-                    size={18}
-                  />
-                </button>
-              </div>
-
-              {clubTyping && (
-                <p className="text-xs text-white/40 mt-2">
-                  {clubTyping}
-                </p>
-              )}
+            <div className="mt-3 space-y-2 text-xs text-white/70">
+              <p className="flex items-center gap-2"><Sparkles size={14} /> Trending posts</p>
+              <p className="flex items-center gap-2"><Users size={14} /> Suggested users</p>
+              <p className="flex items-center gap-2"><Compass size={14} /> Trending clubs</p>
             </div>
           </div>
 
-          <div className="hidden md:block w-[260px] border-l border-white/10 bg-white/5 overflow-y-auto">
-            <div className="p-4 border-b border-white/10">
-              <h2 className="font-semibold">
-                Members
-              </h2>
-            </div>
-
-            <div className="p-4 space-y-4">
-              {clubUsers.map(
-                (user) => (
-                  <div
-                    key={user.id}
-                    className="flex items-center gap-3"
-                  >
-                    <img
-                      src={
-                        user.avatar
-                      }
-                      className="w-12 h-12 rounded-full object-cover"
-                    />
-
-                    <div>
-                      <p className="font-medium">
-                        {
-                          user.nickname
-                        }
-                      </p>
-
-                      <p className="text-xs text-white/40">
-                        {user.bio}
-                      </p>
-                    </div>
-                  </div>
-                )
-              )}
-            </div>
+          <div className="glass rounded-3xl p-4 text-xs text-white/70">
+            <div className="flex items-center gap-2"><Bell size={14} /> Admin + moderation ready</div>
+            <p className="mt-2">Reports, block system, and club moderation models/routes are included in this foundation.</p>
           </div>
-        </div>
-      )}
+        </aside>
+      </div>
     </main>
   );
 }
