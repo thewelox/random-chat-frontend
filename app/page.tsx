@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { io } from "socket.io-client";
 import { Bell, Compass, Home, MessageCircle, PlusSquare, Search, Settings, Shield, Sparkles, Users } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -10,8 +10,6 @@ const socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001",
   autoConnect: false,
   transports: ["websocket"],
 });
-
-type AuthMode = "login" | "signup";
 
 interface FeedPost {
   _id: string;
@@ -23,18 +21,18 @@ interface FeedPost {
 }
 
 export default function HomePage() {
-  const [authMode, setAuthMode] = useState<AuthMode>("login");
-  const [token, setToken] = useState<string>(() => {
+  const [displayName, setDisplayName] = useState<string>(() => {
     if (typeof window === "undefined") return "";
-    return localStorage.getItem("vibe_token") || "";
+    return localStorage.getItem("vibe_name") || "";
   });
+  const [joined, setJoined] = useState<boolean>(() => Boolean(displayName));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [feed, setFeed] = useState<FeedPost[]>([]);
-  const [notificationsCount, setNotificationsCount] = useState(0);
+  const notificationsCount = 3;
   const [online, setOnline] = useState(false);
   const [activeTab, setActiveTab] = useState("feed");
-  const [form, setForm] = useState({ username: "", nickname: "", identifier: "", email: "", password: "", rememberMe: true });
+  const [nameInput, setNameInput] = useState(displayName);
   const [newPost, setNewPost] = useState("");
 
   const navItems = useMemo(
@@ -49,8 +47,17 @@ export default function HomePage() {
     []
   );
 
+  async function loadFeed() {
+    try {
+      const data = await api<{ posts: FeedPost[] }>(endpoints.feed);
+      setFeed(data.posts || []);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   useEffect(() => {
-    if (!token) return;
+    if (!joined || !displayName) return;
 
     const handleConnect = () => setOnline(true);
     const handleDisconnect = () => setOnline(false);
@@ -58,76 +65,54 @@ export default function HomePage() {
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
     socket.connect();
-    socket.emit("presence:online", { userId: token.slice(0, 12) });
-
-    void loadFeed(token);
-    void loadNotifications(token);
+    socket.emit("presence:online", { userId: displayName });
 
     return () => {
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
       socket.disconnect();
     };
-  }, [token]);
-
-  async function loadFeed(currentToken: string) {
-    try {
-      const data = await api<{ posts: FeedPost[] }>(endpoints.feed, { token: currentToken });
-      setFeed(data.posts || []);
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  async function loadNotifications(currentToken: string) {
-    try {
-      const data = await api<{ notifications: Array<{ isRead: boolean }> }>(endpoints.notifications, { token: currentToken });
-      setNotificationsCount((data.notifications || []).filter((n) => !n.isRead).length);
-    } catch {
-      setNotificationsCount(0);
-    }
-  }
-
-  async function handleAuth(e: FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
-
-    try {
-      const payload =
-        authMode === "signup"
-          ? { username: form.username, nickname: form.nickname, email: form.email, password: form.password }
-          : { identifier: form.identifier, password: form.password };
-
-      const endpoint = authMode === "signup" ? endpoints.signup : endpoints.login;
-      const data = await api<{ token: string }>(endpoint, { method: "POST", body: payload });
-
-      setToken(data.token);
-      if (form.rememberMe) localStorage.setItem("vibe_token", data.token);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Authentication failed");
-    } finally {
-      setLoading(false);
-    }
-  }
+  }, [joined, displayName]);
 
   async function createPost() {
-    if (!newPost.trim() || !token) return;
-    try {
-      await api(endpoints.createPost, { method: "POST", token, body: { content: newPost, postType: "text" } });
-      setNewPost("");
-      await loadFeed(token);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Post failed");
+    if (!newPost.trim()) return;
+
+    const post: FeedPost = {
+      _id: String(Date.now()),
+      content: newPost.trim(),
+      likes: [],
+      comments: [],
+      createdAt: new Date().toISOString(),
+      userId: { username: displayName.toLowerCase().replace(/\s+/g, ""), nickname: displayName, verified: false },
+    };
+
+    setFeed((prev) => [post, ...prev]);
+    setNewPost("");
+  }
+
+  function enterVibe() {
+    if (!nameInput.trim()) {
+      setError("Enter a name to continue");
+      return;
     }
+    setLoading(true);
+    setError("");
+    const cleanName = nameInput.trim();
+    setDisplayName(cleanName);
+    localStorage.setItem("vibe_name", cleanName);
+    setJoined(true);
+    setLoading(false);
+    void loadFeed();
   }
 
   function logout() {
-    setToken("");
-    localStorage.removeItem("vibe_token");
+    setJoined(false);
+    setDisplayName("");
+    setNameInput("");
+    localStorage.removeItem("vibe_name");
   }
 
-  if (!token) {
+  if (!joined) {
     return (
       <main className="min-h-screen px-5 py-10 md:px-10 flex items-center justify-center">
         <motion.section initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} className="glass vibe-shadow w-full max-w-md rounded-3xl p-7">
@@ -135,27 +120,15 @@ export default function HomePage() {
           <h1 className="mt-2 text-4xl font-black tracking-tight">VIBE</h1>
           <p className="text-sm text-white/60 mt-2">Meet. Chat. Connect.</p>
 
-          <div className="mt-5 flex gap-2 rounded-2xl bg-black/30 p-1">
-            <button className={`flex-1 rounded-xl py-2 text-sm ${authMode === "login" ? "bg-purple-600" : "text-white/70"}`} onClick={() => setAuthMode("login")}>Login</button>
-            <button className={`flex-1 rounded-xl py-2 text-sm ${authMode === "signup" ? "bg-purple-600" : "text-white/70"}`} onClick={() => setAuthMode("signup")}>Signup</button>
+          <div className="mt-5 space-y-3">
+            <input className="w-full rounded-2xl bg-white/10 px-4 py-3 outline-none" placeholder="Pick your name" value={nameInput} onChange={(e) => setNameInput(e.target.value)} />
+            {error && <p className="text-sm text-rose-300">{error}</p>}
+            <button disabled={loading} onClick={enterVibe} className="w-full rounded-2xl bg-purple-600 py-3 font-semibold hover:bg-purple-500 transition">
+              {loading ? "Entering..." : "Enter VIBE"}
+            </button>
           </div>
 
-          <form onSubmit={handleAuth} className="mt-5 space-y-3">
-            {authMode === "signup" && (
-              <>
-                <input className="w-full rounded-2xl bg-white/10 px-4 py-3 outline-none" placeholder="@username" value={form.username} onChange={(e) => setForm((p) => ({ ...p, username: e.target.value }))} />
-                <input className="w-full rounded-2xl bg-white/10 px-4 py-3 outline-none" placeholder="Nickname" value={form.nickname} onChange={(e) => setForm((p) => ({ ...p, nickname: e.target.value }))} />
-                <input className="w-full rounded-2xl bg-white/10 px-4 py-3 outline-none" placeholder="Email" type="email" value={form.email} onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))} />
-              </>
-            )}
-            {authMode === "login" && <input className="w-full rounded-2xl bg-white/10 px-4 py-3 outline-none" placeholder="Email or @username" value={form.identifier} onChange={(e) => setForm((p) => ({ ...p, identifier: e.target.value }))} />}
-            <input className="w-full rounded-2xl bg-white/10 px-4 py-3 outline-none" placeholder="Password" type="password" value={form.password} onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))} />
-            <label className="flex items-center gap-2 text-xs text-white/70"><input type="checkbox" checked={form.rememberMe} onChange={(e) => setForm((p) => ({ ...p, rememberMe: e.target.checked }))} /> Remember me</label>
-            {error && <p className="text-sm text-rose-300">{error}</p>}
-            <button disabled={loading} className="w-full rounded-2xl bg-purple-600 py-3 font-semibold hover:bg-purple-500 transition">{loading ? "Please wait..." : authMode === "login" ? "Enter VIBE" : "Create account"}</button>
-          </form>
-
-          <p className="mt-6 text-[11px] text-white/50">Email verification and password reset endpoints are scaffold-ready.</p>
+          <p className="mt-6 text-[11px] text-white/50">No authentication required right now.</p>
         </motion.section>
       </main>
     );
