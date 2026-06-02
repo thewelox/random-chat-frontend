@@ -21,18 +21,16 @@ interface FeedPost {
 }
 
 export default function HomePage() {
-  const [displayName, setDisplayName] = useState<string>(() => {
-    if (typeof window === "undefined") return "";
-    return localStorage.getItem("vibe_name") || "";
-  });
-  const [joined, setJoined] = useState<boolean>(() => Boolean(displayName));
+  const [isHydrated, setIsHydrated] = useState(false);
+  const [displayName, setDisplayName] = useState<string>("");
+  const [joined, setJoined] = useState<boolean>(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [feed, setFeed] = useState<FeedPost[]>([]);
   const notificationsCount = 3;
   const [online, setOnline] = useState(false);
   const [activeTab, setActiveTab] = useState("feed");
-  const [nameInput, setNameInput] = useState(displayName);
+  const [nameInput, setNameInput] = useState("");
   const [newPost, setNewPost] = useState("");
 
   const navItems = useMemo(
@@ -57,6 +55,26 @@ export default function HomePage() {
   }
 
   useEffect(() => {
+    const savedName = localStorage.getItem("vibe_name") || "";
+    const timer = setTimeout(() => {
+      if (savedName) {
+        setDisplayName(savedName);
+        setNameInput(savedName);
+        setJoined(true);
+      }
+      setIsHydrated(true);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!joined) return;
+    void api<{ posts: FeedPost[] }>(endpoints.feed)
+      .then((data) => setFeed(data.posts || []))
+      .catch((err) => console.error(err));
+  }, [joined]);
+
+  useEffect(() => {
     if (!joined || !displayName) return;
 
     const handleConnect = () => setOnline(true);
@@ -77,17 +95,31 @@ export default function HomePage() {
   async function createPost() {
     if (!newPost.trim()) return;
 
-    const post: FeedPost = {
+    const content = newPost.trim();
+    setNewPost("");
+
+    try {
+      const data = await api<{ post: FeedPost }>(endpoints.createPost, {
+        method: "POST",
+        body: { content, postType: "text", guestName: displayName },
+      });
+      if (data.post) {
+        setFeed((prev) => [data.post, ...prev]);
+        return;
+      }
+    } catch (err) {
+      console.error(err);
+    }
+
+    const fallbackPost: FeedPost = {
       _id: String(Date.now()),
-      content: newPost.trim(),
+      content,
       likes: [],
       comments: [],
       createdAt: new Date().toISOString(),
       userId: { username: displayName.toLowerCase().replace(/\s+/g, ""), nickname: displayName, verified: false },
     };
-
-    setFeed((prev) => [post, ...prev]);
-    setNewPost("");
+    setFeed((prev) => [fallbackPost, ...prev]);
   }
 
   function enterVibe() {
@@ -106,10 +138,16 @@ export default function HomePage() {
   }
 
   function logout() {
+    setOnline(false);
+    setFeed([]);
     setJoined(false);
     setDisplayName("");
     setNameInput("");
     localStorage.removeItem("vibe_name");
+  }
+
+  if (!isHydrated) {
+    return <main className="min-h-screen px-5 py-10 md:px-10" />;
   }
 
   if (!joined) {
@@ -148,7 +186,7 @@ export default function HomePage() {
             ))}
           </div>
           <button onClick={logout} className="mt-6 w-full rounded-2xl bg-white/10 py-2 text-sm hover:bg-white/20">Logout</button>
-          <p className="mt-6 text-xs text-white/50">Built with ?? by WELOX & CO</p>
+          <p className="mt-6 text-xs text-white/50">Built with love by WELOX & CO</p>
         </aside>
 
         <section className="space-y-4">
@@ -177,7 +215,7 @@ export default function HomePage() {
                 {feed.map((post) => (
                   <motion.article key={post._id} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="glass rounded-3xl p-4">
                     <div className="flex items-center justify-between text-xs text-white/60">
-                      <p>@{post.userId?.username || "viber"} ? {post.userId?.nickname || "VIBE User"}</p>
+                      <p>@{post.userId?.username || "viber"} - {post.userId?.nickname || "VIBE User"}</p>
                       <p>{new Date(post.createdAt).toLocaleString()}</p>
                     </div>
                     <p className="mt-3 text-sm leading-relaxed">{post.content || "No content"}</p>
